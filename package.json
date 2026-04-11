@@ -1,0 +1,40 @@
+{
+  "name": "db-search",
+  "version": "1.0.0",
+  "description": "CLI tool to search Deutsche Bahn train journeys with BahnCard and Deutschlandticket support",
+  "type": "module",
+  "bin": {
+    "db-search": "./db-search.mjs"
+  },
+  "keywords": [
+    "deutsche-bahn",
+    "db",
+    "train",
+    "search",
+    "cli",
+    "germany",
+    "bahncard",
+    "deutschlandticket",
+    "sparpreis",
+    "travel"
+  ],
+  "author": "Henrique Magalhaes <henrique.albertino@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/magalhaesh/db-search.git"
+  },
+  "homepage": "https://github.com/magalhaesh/db-search",
+  "bugs": {
+    "url": "https://github.com/magalhaesh/db-search/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "db-search.mjs"
+  ],
+  "dependencies": {
+    "db-vendo-client": "^6.10.8"
+  }
+}
