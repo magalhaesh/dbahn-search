@@ -1,4 +1,4 @@
-# db-search
+# dbahn-search
 
 CLI tool for searching Deutsche Bahn train journeys. Built on [db-vendo-client](https://github.com/public-transport/db-vendo-client), the current library for DB's Vendo/Movas API.
 
@@ -17,38 +17,38 @@ npx dbahn-search "Berlin Hbf" "Hamburg Hbf"
 ## Usage
 
 ```bash
-db-search <from> <to> [datetime] [options]
+dbahn-search <from> <to> [datetime] [options]
 ```
 
 ### Examples
 
 ```bash
 # Search for trains departing now
-db-search "Berlin Hbf" "Hamburg Hbf"
+dbahn-search "Berlin Hbf" "Hamburg Hbf"
 
 # Specific date and time
-db-search "Berlin Hbf" "München Hbf" "2026-04-20 10:00"
+dbahn-search "Berlin Hbf" "München Hbf" "2026-04-20 10:00"
 
 # Time only (uses today's date)
-db-search "Frankfurt Hbf" "Köln Hbf" "14:30"
+dbahn-search "Frankfurt Hbf" "Köln Hbf" "14:30"
 
 # Find cheapest journeys across the day
-db-search "Berlin Hbf" "München Hbf" "2026-04-20" --bestprice
+dbahn-search "Berlin Hbf" "München Hbf" "2026-04-20" --bestprice
 
 # With BahnCard 50 discount
-db-search "Berlin Hbf" "Hamburg Hbf" --bahncard 50
+dbahn-search "Berlin Hbf" "Hamburg Hbf" --bahncard 50
 
 # With Deutschlandticket
-db-search "Berlin Hbf" "Dresden Hbf" --deutschlandticket
+dbahn-search "Berlin Hbf" "Dresden Hbf" --deutschlandticket
 
 # Combine discounts
-db-search "Berlin Hbf" "München Hbf" "2026-04-20" --bahncard 50 --deutschlandticket --bestprice
+dbahn-search "Berlin Hbf" "München Hbf" "2026-04-20" --bahncard 50 --deutschlandticket --bestprice
 
 # Limit transfers
-db-search "Marburg (Lahn)" "Berlin Hbf" --transfers 1
+dbahn-search "Marburg (Lahn)" "Berlin Hbf" --transfers 1
 
 # JSON output (for scripting)
-db-search "Berlin Hbf" "Hamburg Hbf" --json
+dbahn-search "Berlin Hbf" "Hamburg Hbf" --json
 ```
 
 ### Options
@@ -83,7 +83,7 @@ Berlin Hbf -> Hamburg Hbf  ·  Sat, 20 Apr 2026
 
 ## How it works
 
-db-search queries Deutsche Bahn's current APIs via [db-vendo-client](https://github.com/public-transport/db-vendo-client). Station names are resolved using both the DB Navigator API and bahn.de's location API (for generating accurate booking links).
+dbahn-search queries Deutsche Bahn's current APIs via [db-vendo-client](https://github.com/public-transport/db-vendo-client). Station names are resolved using both the DB Navigator API and bahn.de's location API (for generating accurate booking links).
 
 Prices shown are Sparpreis/Super Sparpreis fares when available. For exact fares and booking, follow the provided bahn.de links.
 

@@ -4,7 +4,7 @@
   "description": "CLI tool to search Deutsche Bahn train journeys with BahnCard and Deutschlandticket support",
   "type": "module",
   "bin": {
-    "db-search": "db-search.mjs"
+    "dbahn-search": "dbahn-search.mjs"
   },
   "keywords": [
     "deutsche-bahn",
@@ -22,17 +22,17 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+ssh://git@github.com/magalhaesh/db-search.git"
+    "url": "git+ssh://git@github.com/magalhaesh/dbahn-search.git"
   },
-  "homepage": "https://github.com/magalhaesh/db-search",
+  "homepage": "https://github.com/magalhaesh/dbahn-search",
   "bugs": {
-    "url": "https://github.com/magalhaesh/db-search/issues"
+    "url": "https://github.com/magalhaesh/dbahn-search/issues"
   },
   "engines": {
     "node": ">=18"
   },
   "files": [
-    "db-search.mjs"
+    "dbahn-search.mjs"
   ],
   "dependencies": {
     "db-vendo-client": "^6.10.8"

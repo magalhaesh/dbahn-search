@@ -4,7 +4,7 @@ import {createClient} from 'db-vendo-client';
 import {profile as dbnavProfile} from 'db-vendo-client/p/dbnav/index.js';
 import {data as loyaltyCards} from 'db-vendo-client/format/loyalty-cards.js';
 
-const client = createClient(dbnavProfile, 'db-search-cli');
+const client = createClient(dbnavProfile, 'dbahn-search');
 
 // --- Argument parsing ---
 
@@ -47,7 +47,7 @@ const [fromQuery, toQuery, ...datetimeParts] = positional;
 const datetimeStr = datetimeParts.join(' ') || null;
 
 function printUsage() {
-	console.log(`Usage: db-search <from> <to> [datetime] [options]
+	console.log(`Usage: dbahn-search <from> <to> [datetime] [options]
 
 Arguments:
   from          Origin station (e.g. "Berlin Hbf")
