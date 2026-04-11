@@ -5,13 +5,13 @@ CLI tool for searching Deutsche Bahn train journeys. Built on [db-vendo-client](
 ## Install
 
 ```bash
-npm install -g db-search
+npm install -g dbahn-search
 ```
 
 Or run directly with npx:
 
 ```bash
-npx db-search "Berlin Hbf" "Hamburg Hbf"
+npx dbahn-search "Berlin Hbf" "Hamburg Hbf"
 ```
 
 ## Usage

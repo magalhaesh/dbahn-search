@@ -1,10 +1,10 @@
 {
-  "name": "db-search",
+  "name": "dbahn-search",
   "version": "1.0.0",
   "description": "CLI tool to search Deutsche Bahn train journeys with BahnCard and Deutschlandticket support",
   "type": "module",
   "bin": {
-    "db-search": "./db-search.mjs"
+    "db-search": "db-search.mjs"
   },
   "keywords": [
     "deutsche-bahn",
