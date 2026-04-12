@@ -85,7 +85,9 @@ Options:
   --bahncard N     Apply BahnCard discount (25, 50, or 100)
   --deutschlandticket  Show prices with Deutschlandticket
   --json           Output raw JSON
-  -h, --help       Show this help`);
+  -h, --help       Show this help
+
+Useful? https://ko-fi.com/magalhaesh`);
 }
 
 // --- Date parsing ---

@@ -104,6 +104,10 @@ dbahn-search queries Deutsche Bahn's current APIs via [db-vendo-client](https://
 
 Prices shown are Sparpreis/Super Sparpreis fares when available. For exact fares and booking, follow the provided bahn.de links.
 
+## Support
+
+If you find this useful, consider [buying me a coffee](https://ko-fi.com/magalhaesh).
+
 ## License
 
 MIT
