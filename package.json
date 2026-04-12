@@ -1,6 +1,6 @@
 {
   "name": "dbahn-search",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "CLI tool to search Deutsche Bahn train journeys with BahnCard and Deutschlandticket support",
   "type": "module",
   "bin": {

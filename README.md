@@ -51,12 +51,29 @@ dbahn-search "Marburg (Lahn)" "Berlin Hbf" --transfers 1
 dbahn-search "Berlin Hbf" "Hamburg Hbf" --json
 ```
 
+### Find the cheapest day
+
+```bash
+# Cheapest day in the next 7 days
+dbahn-search "Berlin Hbf" "München Hbf" --cheapest
+
+# Cheapest day in a specific range
+dbahn-search "Berlin Hbf" "München Hbf" --cheapest 2026-04-14 2026-04-28
+
+# Cheapest day in a full month
+dbahn-search "Berlin Hbf" "Hamburg Hbf" --cheapest 2026-05
+
+# Combine with BahnCard and Deutschlandticket
+dbahn-search "Berlin Hbf" "München Hbf" --cheapest --bahncard 50 --deutschlandticket
+```
+
 ### Options
 
 | Flag | Description |
 |------|-------------|
 | `--results N` | Number of results (default: 5) |
 | `--bestprice` | Find cheapest journeys across the day |
+| `--cheapest [start] [end]` | Find cheapest day in a date range |
 | `--first-class` | Search first class prices |
 | `--transfers N` | Maximum number of transfers |
 | `--bahncard N` | Apply BahnCard discount (25, 50, or 100) |

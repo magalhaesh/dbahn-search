@@ -3,7 +3,9 @@
 import {createClient} from 'db-vendo-client';
 import {profile as dbnavProfile} from 'db-vendo-client/p/dbnav/index.js';
 import {data as loyaltyCards} from 'db-vendo-client/format/loyalty-cards.js';
+import {styleText as _styleText} from 'node:util';
 
+const styleText = _styleText || ((_, s) => s);
 const client = createClient(dbnavProfile, 'dbahn-search');
 
 // --- Argument parsing ---
@@ -11,6 +13,9 @@ const client = createClient(dbnavProfile, 'dbahn-search');
 const args = process.argv.slice(2);
 const flags = {};
 const positional = [];
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const MONTH_RE = /^\d{4}-\d{2}$/;
 
 for (let i = 0; i < args.length; i++) {
 	if (args[i] === '--results' && args[i + 1]) {
@@ -30,6 +35,17 @@ for (let i = 0; i < args.length; i++) {
 		flags.deutschlandticket = true;
 	} else if (args[i] === '--json') {
 		flags.json = true;
+	} else if (args[i] === '--cheapest') {
+		flags.cheapest = true;
+		// Peek at next 1-2 args for date range
+		if (args[i + 1] && (DATE_RE.test(args[i + 1]) || MONTH_RE.test(args[i + 1]))) {
+			flags.cheapestStart = args[i + 1];
+			i++;
+			if (args[i + 1] && DATE_RE.test(args[i + 1])) {
+				flags.cheapestEnd = args[i + 1];
+				i++;
+			}
+		}
 	} else if (args[i] === '--help' || args[i] === '-h') {
 		printUsage();
 		process.exit(0);
@@ -58,6 +74,12 @@ Arguments:
 Options:
   --results N      Number of results (default: 5)
   --bestprice      Find cheapest journeys across the day
+  --cheapest [start] [end]
+                   Find cheapest day in a date range
+                   "2026-04-14 2026-04-28"  explicit range
+                   "2026-04-14"             7 days from date
+                   "2026-04"                full month
+                   (no args)                next 7 days
   --first-class    Search first class prices
   --transfers N    Maximum transfers
   --bahncard N     Apply BahnCard discount (25, 50, or 100)
@@ -91,6 +113,221 @@ function parseDatetime(str) {
 		process.exit(1);
 	}
 	return d;
+}
+
+// --- Cheapest day: date range ---
+
+function parseCheapestRange(flags) {
+	const today = new Date();
+	today.setHours(0, 0, 0, 0);
+
+	let startDate, endDate;
+
+	if (!flags.cheapestStart) {
+		// No args: next 7 days
+		startDate = new Date(today);
+		endDate = new Date(today);
+		endDate.setDate(endDate.getDate() + 6);
+	} else if (MONTH_RE.test(flags.cheapestStart)) {
+		// Month format: "2026-04"
+		const [year, month] = flags.cheapestStart.split('-').map(Number);
+		startDate = new Date(year, month - 1, 1);
+		endDate = new Date(year, month, 0); // last day of month
+	} else if (flags.cheapestEnd) {
+		// Explicit range: "2026-04-14 2026-04-28"
+		startDate = new Date(flags.cheapestStart + 'T00:00:00');
+		endDate = new Date(flags.cheapestEnd + 'T00:00:00');
+	} else {
+		// Single date: 7 days from that date
+		startDate = new Date(flags.cheapestStart + 'T00:00:00');
+		endDate = new Date(startDate);
+		endDate.setDate(endDate.getDate() + 6);
+	}
+
+	if (endDate < startDate) {
+		console.error('Error: End date must be after start date.');
+		process.exit(1);
+	}
+
+	const days = Math.round((endDate - startDate) / 86400000) + 1;
+	if (days > 31) {
+		console.error('Error: Maximum range is 31 days. Try a narrower range.');
+		process.exit(1);
+	}
+
+	// Skip past dates
+	if (startDate < today) {
+		startDate = new Date(today);
+	}
+	if (endDate < today) {
+		console.error('Error: All dates in range are in the past.');
+		process.exit(1);
+	}
+
+	return {startDate, endDate};
+}
+
+function generateDateRange(startDate, endDate) {
+	const dates = [];
+	const current = new Date(startDate);
+	const pad = n => String(n).padStart(2, '0');
+	while (current <= endDate) {
+		dates.push(`${current.getFullYear()}-${pad(current.getMonth() + 1)}-${pad(current.getDate())}`);
+		current.setDate(current.getDate() + 1);
+	}
+	return dates;
+}
+
+// --- Cheapest day: scanning ---
+
+async function scanCheapestDays(fromId, toId, dates, opts) {
+	const results = [];
+	const batchSize = 5;
+	const showProgress = process.stderr.isTTY;
+
+	for (let i = 0; i < dates.length; i += batchSize) {
+		const batch = dates.slice(i, i + batchSize);
+		const promises = batch.map(async (date) => {
+			try {
+				const dayOpts = {
+					...opts,
+					departure: new Date(date + 'T00:00:00'),
+					bestprice: true,
+					results: 1,
+				};
+				let res = await client.journeys(fromId, toId, dayOpts);
+				// bestprice can return 0 results with some flag combos (e.g. Deutschlandticket)
+				// Fall back to normal search and pick cheapest
+				if (!res.journeys?.length) {
+					delete dayOpts.bestprice;
+					dayOpts.results = 5;
+					res = await client.journeys(fromId, toId, dayOpts);
+				}
+				const journeys = res.journeys || [];
+				const journey = journeys
+					.filter(j => j.price?.amount != null)
+					.sort((a, b) => a.price.amount - b.price.amount)[0] || journeys[0] || null;
+				return {
+					date,
+					journey,
+					price: journey?.price?.amount ?? null,
+					error: false,
+				};
+			} catch {
+				return {date, journey: null, price: null, error: true};
+			}
+		});
+		const batchResults = await Promise.all(promises);
+		results.push(...batchResults);
+
+		if (showProgress) {
+			const done = Math.min(i + batchSize, dates.length);
+			const filled = Math.round((done / dates.length) * 20);
+			const bar = '█'.repeat(filled) + '░'.repeat(20 - filled);
+			process.stderr.write(`\rScanning... ${bar} ${done}/${dates.length}`);
+		}
+	}
+
+	if (showProgress) {
+		process.stderr.write('\r' + ' '.repeat(50) + '\r');
+	}
+
+	return results;
+}
+
+// --- Cheapest day: formatting ---
+
+function formatCheapestResults(fromName, toName, results, fromBahnDe, toBahnDe) {
+	const withPrices = results.filter(r => r.price !== null);
+	const sorted = [
+		...withPrices.sort((a, b) => a.price - b.price),
+		...results.filter(r => r.price === null),
+	];
+
+	if (withPrices.length === 0) {
+		console.error('No prices found for any day in range.');
+		process.exit(1);
+	}
+
+	// Color thresholds (percentiles of prices that exist)
+	const prices = withPrices.map(r => r.price);
+	const p25 = prices[Math.floor(prices.length * 0.25)];
+	const p75 = prices[Math.floor(prices.length * 0.75)];
+	const cheapest = prices[0];
+
+	// Date range header
+	const firstDate = new Date(results[0].date + 'T00:00:00');
+	const lastDate = new Date(results[results.length - 1].date + 'T00:00:00');
+	const rangeStr = formatDateRange(firstDate, lastDate);
+
+	console.log(`${fromName} -> ${toName}  ·  cheapest days  ·  ${rangeStr}`);
+	console.log('─'.repeat(60));
+	console.log();
+
+	for (const r of sorted) {
+		const d = new Date(r.date + 'T00:00:00');
+		const dayStr = d.toLocaleDateString('en-GB', {weekday: 'short', day: 'numeric', month: 'short'});
+
+		if (r.price === null) {
+			const reason = r.error ? '(error)' : '';
+			const line = `     ${dayStr.padEnd(14)}  --  ${reason}`;
+			console.log(styleText('dim', line));
+			continue;
+		}
+
+		const isCheapest = r.price === cheapest;
+		const star = isCheapest ? '  ★' : '   ';
+		const priceStr = `${r.price.toFixed(2)} EUR`;
+
+		// Journey details
+		const j = r.journey;
+		const trainProduct = j.legs
+			.filter(l => l.line)
+			.map(l => l.line.productName || l.line.product || '')
+			.find(p => p) || '';
+		const depTime = formatTime(j.legs[0].departure || j.legs[0].plannedDeparture);
+		const duration = formatDuration(j);
+
+		const detailStr = `${trainProduct.padEnd(4)} dep ${depTime}   ${duration}`;
+		const line = `${star}  ${dayStr.padEnd(14)}${priceStr.padStart(10)}   ${detailStr}`;
+
+		// Color based on percentile
+		if (isCheapest) {
+			console.log(styleText('bold', styleText('green', line)));
+		} else if (r.price <= p25) {
+			console.log(styleText('green', line));
+		} else if (r.price >= p75) {
+			console.log(styleText('yellow', line));
+		} else {
+			console.log(line);
+		}
+	}
+
+	// Summary
+	console.log();
+	console.log('─'.repeat(60));
+	const cheapestDay = sorted[0];
+	const cheapestDate = new Date(cheapestDay.date + 'T00:00:00');
+	const cheapestDayStr = cheapestDate.toLocaleDateString('en-GB', {weekday: 'short', day: 'numeric', month: 'short'});
+	console.log(`${results.length} days scanned. Cheapest: ${cheapestDay.price.toFixed(2)} EUR on ${cheapestDayStr}.`);
+
+	// Booking URL for cheapest day
+	if (fromBahnDe && toBahnDe && cheapestDay.journey) {
+		const depIso = cheapestDay.journey.legs[0].departure || cheapestDay.journey.legs[0].plannedDeparture;
+		console.log(buildBookingUrl(fromBahnDe, toBahnDe, depIso));
+	}
+}
+
+function formatDateRange(start, end) {
+	const sMonth = start.toLocaleDateString('en-US', {month: 'short'});
+	const eMonth = end.toLocaleDateString('en-US', {month: 'short'});
+	const sDay = start.getDate();
+	const eDay = end.getDate();
+	const eYear = end.getFullYear();
+	if (sMonth === eMonth) {
+		return `${sDay} - ${eDay} ${sMonth} ${eYear}`;
+	}
+	return `${sDay} ${sMonth} - ${eDay} ${eMonth} ${eYear}`;
 }
 
 // --- Station resolution ---
@@ -184,14 +421,64 @@ function formatDate(date) {
 // --- Main ---
 
 async function main() {
-	const departure = parseDatetime(datetimeStr);
-
 	const [from, to, fromBahnDe, toBahnDe] = await Promise.all([
 		resolveStation(fromQuery),
 		resolveStation(toQuery),
 		resolveBahnDeStation(fromQuery),
 		resolveBahnDeStation(toQuery),
 	]);
+
+	// --- Cheapest day mode ---
+	if (flags.cheapest) {
+		if (datetimeStr) {
+			console.error('Error: Cannot combine --cheapest with a specific departure time.');
+			process.exit(1);
+		}
+
+		const {startDate, endDate} = parseCheapestRange(flags);
+		const dates = generateDateRange(startDate, endDate);
+
+		const opts = {
+			firstClass: flags.firstClass || false,
+			language: 'en',
+		};
+		if (flags.transfers !== undefined) opts.transfers = flags.transfers;
+		if (flags.bahncard) {
+			opts.loyaltyCard = {
+				type: loyaltyCards.BAHNCARD,
+				discount: flags.bahncard,
+				class: flags.firstClass ? 1 : 2,
+			};
+		}
+		if (flags.deutschlandticket) opts.deutschlandTicketDiscount = true;
+
+		const results = await scanCheapestDays(from.id, to.id, dates, opts);
+
+		if (flags.json) {
+			const jsonOut = {
+				from: from.name,
+				to: to.name,
+				range: {start: dates[0], end: dates[dates.length - 1]},
+				days: results.map(r => ({
+					date: r.date,
+					price: r.price,
+					currency: r.price !== null ? 'EUR' : null,
+					departure: r.journey ? formatTime(r.journey.legs[0].departure || r.journey.legs[0].plannedDeparture) : null,
+					train: r.journey ? getTrainTypes(r.journey) : null,
+					duration_min: r.journey ? Math.round((new Date(r.journey.legs[r.journey.legs.length - 1].arrival || r.journey.legs[r.journey.legs.length - 1].plannedArrival) - new Date(r.journey.legs[0].departure || r.journey.legs[0].plannedDeparture)) / 60000) : null,
+					error: r.error,
+				})),
+			};
+			console.log(JSON.stringify(jsonOut, null, 2));
+			return;
+		}
+
+		formatCheapestResults(from.name, to.name, results, fromBahnDe, toBahnDe);
+		return;
+	}
+
+	// --- Normal search mode ---
+	const departure = parseDatetime(datetimeStr);
 
 	const opts = {
 		departure,
