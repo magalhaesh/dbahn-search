@@ -1,12 +1,17 @@
 #!/usr/bin/env node
 
 import {createClient} from 'db-vendo-client';
-import {profile as dbnavProfile} from 'db-vendo-client/p/dbnav/index.js';
+import {profile as dbProfile} from 'db-vendo-client/p/db/index.js';
 import {data as loyaltyCards} from 'db-vendo-client/format/loyalty-cards.js';
 import {styleText as _styleText} from 'node:util';
+import {createCache, SIX_MONTHS, FOUR_HOURS, THREE_DAYS} from './cache.mjs';
 
 const styleText = _styleText || ((_, s) => s);
-const client = createClient(dbnavProfile, 'dbahn-search');
+// Using `db` profile (app.vendo.noncd.db.de) rather than `dbnav`
+// (app.services-bahn.de) because the latter is behind Akamai Bot
+// Manager which fingerprints Node's TLS and returns 403. Same request
+// format, different hostname.
+const client = createClient(dbProfile, 'dbahn-search');
 
 // --- Argument parsing ---
 
@@ -46,6 +51,8 @@ for (let i = 0; i < args.length; i++) {
 				i++;
 			}
 		}
+	} else if (args[i] === '--no-cache') {
+		flags.noCache = true;
 	} else if (args[i] === '--help' || args[i] === '-h') {
 		printUsage();
 		process.exit(0);
@@ -84,6 +91,7 @@ Options:
   --transfers N    Maximum transfers
   --bahncard N     Apply BahnCard discount (25, 50, or 100)
   --deutschlandticket  Show prices with Deutschlandticket
+  --no-cache       Skip cached results (still writes to cache)
   --json           Output raw JSON
   -h, --help       Show this help
 
@@ -182,7 +190,7 @@ function generateDateRange(startDate, endDate) {
 
 // --- Cheapest day: scanning ---
 
-async function scanCheapestDays(fromId, toId, dates, opts) {
+async function scanCheapestDays(fromId, toId, dates, opts, cache, fromName, toName) {
 	const results = [];
 	const batchSize = 5;
 	const showProgress = process.stderr.isTTY;
@@ -197,14 +205,28 @@ async function scanCheapestDays(fromId, toId, dates, opts) {
 					bestprice: true,
 					results: 1,
 				};
-				let res = await client.journeys(fromId, toId, dayOpts);
-				// bestprice can return 0 results with some flag combos (e.g. Deutschlandticket)
-				// Fall back to normal search and pick cheapest
-				if (!res.journeys?.length) {
-					delete dayOpts.bestprice;
-					dayOpts.results = 5;
+
+				// Check cache first
+				const cacheKey = journeyCacheKey(fromId, toId, dayOpts.departure, dayOpts);
+				const cached = !isWithinThreeDays(dayOpts.departure) && cache.get(cacheKey);
+				let res;
+				if (cached) {
+					res = cached;
+				} else {
 					res = await client.journeys(fromId, toId, dayOpts);
+					// bestprice can return 0 results with some flag combos (e.g. Deutschlandticket)
+					// Fall back to normal search and pick cheapest
+					if (!res.journeys?.length) {
+						delete dayOpts.bestprice;
+						dayOpts.results = 5;
+						res = await client.journeys(fromId, toId, dayOpts);
+					}
+					cache.set(cacheKey, res, FOUR_HOURS);
+					// Log prices from API fetches only
+					const priceEntries = extractPriceEntries(res.journeys || [], fromId, fromName, toId, toName, dayOpts);
+					cache.logPrices(priceEntries);
 				}
+
 				const journeys = res.journeys || [];
 				const journey = journeys
 					.filter(j => j.price?.amount != null)
@@ -420,14 +442,90 @@ function formatDate(date) {
 	});
 }
 
+// --- Caching helpers ---
+
+function journeyOptsKey(opts) {
+	const relevant = {
+		bestprice: opts.bestprice || false,
+		firstClass: opts.firstClass || false,
+		transfers: opts.transfers ?? null,
+		bahncard: opts.loyaltyCard?.discount ?? null,
+		deutschlandticket: opts.deutschlandTicketDiscount || false,
+		results: opts.results || 5,
+	};
+	return JSON.stringify(relevant);
+}
+
+function journeyCacheKey(fromId, toId, departure, opts) {
+	const d = new Date(departure);
+	const pad = n => String(n).padStart(2, '0');
+	// For bestprice/cheapest: key by date only. For normal: key by date+hour.
+	const dateKey = opts.bestprice
+		? `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+		: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}`;
+	return `journey:${fromId}:${toId}:${dateKey}:${journeyOptsKey(opts)}`;
+}
+
+function isWithinThreeDays(departure) {
+	return new Date(departure) - Date.now() < THREE_DAYS;
+}
+
+function extractPriceEntries(journeys, fromId, fromName, toId, toName, opts) {
+	return journeys
+		.filter(j => j.price?.amount != null)
+		.map(j => {
+			const firstLeg = j.legs[0];
+			const lastLeg = j.legs[j.legs.length - 1];
+			const dep = firstLeg.departure || firstLeg.plannedDeparture;
+			const arr = lastLeg.arrival || lastLeg.plannedArrival;
+			return {
+				ts: Math.floor(Date.now() / 1000),
+				from: fromId,
+				fromName,
+				to: toId,
+				toName,
+				dep,
+				price: j.price.amount,
+				currency: j.price.currency || 'EUR',
+				trains: getTrainTypes(j),
+				transfers: getTransferCount(j),
+				duration: Math.round((new Date(arr) - new Date(dep)) / 60000),
+				opts: {
+					bahncard: opts.loyaltyCard?.discount ?? null,
+					deutschlandticket: opts.deutschlandTicketDiscount || false,
+				},
+			};
+		});
+}
+
+async function resolveStationCached(query, cache) {
+	const key = `station:${query.trim().toLowerCase()}`;
+	const cached = cache.get(key);
+	if (cached) return cached;
+	const result = await resolveStation(query);
+	cache.set(key, result, SIX_MONTHS);
+	return result;
+}
+
+async function resolveBahnDeStationCached(query, cache) {
+	const key = `bahnde:${query.trim().toLowerCase()}`;
+	const cached = cache.get(key);
+	if (cached) return cached;
+	const result = await resolveBahnDeStation(query);
+	if (result) cache.set(key, result, SIX_MONTHS);
+	return result;
+}
+
 // --- Main ---
 
 async function main() {
+	const cache = createCache({noRead: flags.noCache});
+
 	const [from, to, fromBahnDe, toBahnDe] = await Promise.all([
-		resolveStation(fromQuery),
-		resolveStation(toQuery),
-		resolveBahnDeStation(fromQuery),
-		resolveBahnDeStation(toQuery),
+		resolveStationCached(fromQuery, cache),
+		resolveStationCached(toQuery, cache),
+		resolveBahnDeStationCached(fromQuery, cache),
+		resolveBahnDeStationCached(toQuery, cache),
 	]);
 
 	// --- Cheapest day mode ---
@@ -454,7 +552,7 @@ async function main() {
 		}
 		if (flags.deutschlandticket) opts.deutschlandTicketDiscount = true;
 
-		const results = await scanCheapestDays(from.id, to.id, dates, opts);
+		const results = await scanCheapestDays(from.id, to.id, dates, opts, cache, from.name, to.name);
 
 		if (flags.json) {
 			const jsonOut = {
@@ -472,10 +570,12 @@ async function main() {
 				})),
 			};
 			console.log(JSON.stringify(jsonOut, null, 2));
+			cache.flush();
 			return;
 		}
 
 		formatCheapestResults(from.name, to.name, results, fromBahnDe, toBahnDe);
+		cache.flush();
 		return;
 	}
 
@@ -503,7 +603,24 @@ async function main() {
 		opts.deutschlandTicketDiscount = true;
 	}
 
-	const res = await client.journeys(from.id, to.id, opts);
+	const cacheKey = journeyCacheKey(from.id, to.id, departure, opts);
+	const cachedRes = !isWithinThreeDays(departure) && cache.get(cacheKey);
+	let res;
+	if (cachedRes) {
+		res = cachedRes;
+	} else {
+		res = await client.journeys(from.id, to.id, opts);
+		// bestprice + Deutschlandticket can return 0 results on the `db`
+		// profile; fall back to standard search (same workaround as in the
+		// --cheapest flow above).
+		if (opts.bestprice && (!res.journeys || res.journeys.length === 0)) {
+			const fallbackOpts = {...opts, bestprice: false, results: flags.results || 10};
+			res = await client.journeys(from.id, to.id, fallbackOpts);
+		}
+		cache.set(cacheKey, res, FOUR_HOURS);
+		const priceEntries = extractPriceEntries(res.journeys || [], from.id, from.name, to.id, to.name, opts);
+		cache.logPrices(priceEntries);
+	}
 
 	if (!res.journeys || res.journeys.length === 0) {
 		console.error('No journeys found. Try a different date/time or check station names.');
@@ -549,6 +666,8 @@ async function main() {
 	const shown = journeys.length;
 	const countMsg = total > shown ? `${shown} of ${total} journeys shown` : `${shown} journeys found`;
 	console.log(`${countMsg}. Book on bahn.de for exact fares.`);
+
+	cache.flush();
 }
 
 main().catch(err => {

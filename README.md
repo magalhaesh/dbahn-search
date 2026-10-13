@@ -78,6 +78,7 @@ dbahn-search "Berlin Hbf" "München Hbf" --cheapest --bahncard 50 --deutschlandt
 | `--transfers N` | Maximum number of transfers |
 | `--bahncard N` | Apply BahnCard discount (25, 50, or 100) |
 | `--deutschlandticket` | Show prices with Deutschlandticket |
+| `--no-cache` | Skip cached results (still writes to cache) |
 | `--json` | Output raw JSON |
 | `-h, --help` | Show help |
 
@@ -97,6 +98,16 @@ Berlin Hbf -> Hamburg Hbf  ·  Sat, 20 Apr 2026
      Price: 27.90 EUR
      https://www.bahn.de/buchung/fahrplan/suche#...
 ```
+
+## Caching
+
+Results are cached locally in `~/.cache/dbahn-search/` (or `$XDG_CACHE_HOME/dbahn-search/`):
+
+- **Station lookups** are cached for 6 months (station IDs rarely change)
+- **Journey prices** are cached for 4 hours (prices within 3 days of departure are never cached)
+- **Price history** is logged to `prices.jsonl` on every API fetch, building a passive price database
+
+Use `--no-cache` to bypass cached results (fresh API calls are still cached for future use).
 
 ## How it works
 
