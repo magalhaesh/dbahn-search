@@ -1,6 +1,6 @@
 {
   "name": "dbahn-search",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "CLI tool to search Deutsche Bahn train journeys with BahnCard and Deutschlandticket support",
   "type": "module",
   "bin": {
@@ -35,8 +35,14 @@
   "engines": {
     "node": ">=18"
   },
+  "scripts": {
+    "test": "node --test test/cache.test.mjs",
+    "test:integration": "node --test test/cli.test.mjs",
+    "test:all": "node --test test/**/*.test.mjs"
+  },
   "files": [
-    "dbahn-search.mjs"
+    "dbahn-search.mjs",
+    "cache.mjs"
   ],
   "dependencies": {
     "db-vendo-client": "^6.10.8"
