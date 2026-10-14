@@ -45,6 +45,6 @@
     "cache.mjs"
   ],
   "dependencies": {
-    "db-vendo-client": "^6.10.8"
+    "db-vendo-client": "^6.11.3"
   }
 }

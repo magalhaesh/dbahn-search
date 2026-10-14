@@ -4,14 +4,32 @@ import {createClient} from 'db-vendo-client';
 import {profile as dbProfile} from 'db-vendo-client/p/db/index.js';
 import {data as loyaltyCards} from 'db-vendo-client/format/loyalty-cards.js';
 import {styleText as _styleText} from 'node:util';
+import https from 'node:https';
 import {createCache, SIX_MONTHS, FOUR_HOURS, THREE_DAYS} from './cache.mjs';
 
 const styleText = _styleText || ((_, s) => s);
-// Using `db` profile (app.vendo.noncd.db.de) rather than `dbnav`
-// (app.services-bahn.de) because the latter is behind Akamai Bot
-// Manager which fingerprints Node's TLS and returns 403. Same request
-// format, different hostname.
-const client = createClient(dbProfile, 'dbahn-search');
+
+// DB's Akamai edge blocks requests by TLS fingerprint (`OPS_BLOCKED`,
+// HTTP 403/452), regardless of host or profile: Node's default
+// ClientHello is rejected, as is X25519:P-256:P-384. Advertising a
+// different set of key-exchange groups gets through. Override with
+// DBAHN_TLS_GROUPS (OpenSSL group list) if this one gets blocked too.
+// See https://github.com/public-transport/db-vendo-client/issues/46
+const TLS_GROUPS = process.env.DBAHN_TLS_GROUPS || 'X25519:P-256';
+const bahnAgent = new https.Agent({
+	// node-fetch (used by db-vendo-client) cannot parse HTTP/2.
+	ALPNProtocols: ['http/1.1'],
+	ecdhCurve: TLS_GROUPS,
+	keepAlive: true,
+});
+const usingProxy = Boolean(process.env.HTTPS_PROXY || process.env.HTTP_PROXY);
+
+// `db` profile: app.services-bahn.de (DB Navigator API) for journeys and
+// locations. Keep db-vendo-client's proxy agent when a proxy is set.
+const client = createClient({
+	...dbProfile,
+	transformReq: (ctx, req) => (usingProxy ? req : {...req, agent: bahnAgent}),
+}, 'dbahn-search');
 
 // --- Argument parsing ---
 
@@ -368,11 +386,31 @@ async function resolveStation(query) {
 	return hbf || stops[0];
 }
 
+// Global fetch (undici) can't take the custom TLS agent, so use node:https.
+function getJson(url) {
+	return new Promise((resolve, reject) => {
+		const req = https.get(url, {
+			agent: bahnAgent,
+			headers: {'Accept': 'application/json', 'User-Agent': 'dbahn-search'},
+			timeout: 15000,
+		}, (res) => {
+			let body = '';
+			res.setEncoding('utf8');
+			res.on('data', chunk => { body += chunk; });
+			res.on('end', () => {
+				if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode}`));
+				try { resolve(JSON.parse(body)); } catch (err) { reject(err); }
+			});
+		});
+		req.on('timeout', () => req.destroy(new Error('timeout')));
+		req.on('error', reject);
+	});
+}
+
 async function resolveBahnDeStation(query) {
 	const url = `https://www.bahn.de/web/api/reiseloesung/orte?suchbegriff=${encodeURIComponent(query)}&typ=ALL&limit=5`;
-	const res = await fetch(url);
-	if (!res.ok) return null;
-	const data = await res.json();
+	const data = await getJson(url).catch(() => null);
+	if (!Array.isArray(data)) return null;
 	const stations = data.filter(s => s.type === 'ST');
 	if (stations.length === 0) return null;
 	const hbf = stations.find(s => /Hbf|Hauptbahnhof/i.test(s.name));

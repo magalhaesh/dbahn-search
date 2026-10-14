@@ -115,6 +115,16 @@ dbahn-search queries Deutsche Bahn's current APIs via [db-vendo-client](https://
 
 Prices shown are Sparpreis/Super Sparpreis fares when available. For exact fares and booking, follow the provided bahn.de links.
 
+### Troubleshooting: `OPS_BLOCKED` / 403
+
+DB's edge blocks requests by TLS fingerprint, including Node's default one. dbahn-search advertises a different set of TLS key-exchange groups (`X25519:P-256`) to get through. If DB starts blocking that too, try another OpenSSL group list:
+
+```bash
+DBAHN_TLS_GROUPS="X25519:P-256:P-521" dbahn-search "Berlin Hbf" "Hamburg Hbf"
+```
+
+Background: [db-vendo-client#46](https://github.com/public-transport/db-vendo-client/issues/46).
+
 ## Support
 
 If you find this useful, consider [buying me a coffee](https://ko-fi.com/magalhaesh).
